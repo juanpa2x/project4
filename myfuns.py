@@ -9,7 +9,7 @@ def readDat(this_url, col_names):
     return pd.DataFrame(this_data, columns=col_names)
 
 def myIBCF(w):
-    w_pred = pd.DataFrame(np.zeros(R_matrix.shape[1]), index=R_matrix.columns, columns=['estimate'])
+    w_pred = pd.DataFrame(np.zeros(S_matrix.shape[1]), index=S_matrix.columns, columns=['estimate'])
     for l in S_top_30.index:
         l_top_30_ix = S_top_30.loc[l, :].values
         w_l_top_30 = w[l_top_30_ix]
@@ -24,28 +24,23 @@ def myIBCF(w):
     return w_sorted.head(10).index.values, w_sorted
 
 target_url = "https://liangfgithub.github.io/MovieData/"
-df_ratings = readDat(target_url + 'ratings.dat?raw=true', ['UserID', 'movie_id', 'Rating', 'Timestamp'])
-df_ratings['UserID'] = df_ratings.UserID.astype(int)
-df_ratings['Rating'] = df_ratings.Rating.astype(int)
 df_movies = readDat(target_url + 'movies.dat?raw=true', ['movie_id', 'title', 'genres'])
 
-df_users = readDat(target_url + 'users.dat?raw=true', ['UserID', 'Gender', 'Age', 'Occupation', 'Zip-code'])
-df_users['Age'] = df_users.Age.astype(int)
-df_users['UserID'] = df_users.UserID.astype(int)
+# df_users = readDat(target_url + 'users.dat?raw=true', ['UserID', 'Gender', 'Age', 'Occupation', 'Zip-code'])
+# df_users['Age'] = df_users.Age.astype(int)
+# df_users['UserID'] = df_users.UserID.astype(int)
 
 #read pre-built dataframes
 df_selection = pd.read_csv("movies_top.csv", index_col=0)
-R_matrix = pd.read_csv("r_matrix.csv", index_col=0)
 S_matrix = pd.read_csv("s_matrix.csv", index_col=0)
 S_top_30 = pd.read_csv("s_top_30.csv", index_col=0)
 
-w_empty = R_matrix.iloc[0, :].copy()
-w_empty.iloc[:] = None
+w_empty = pd.DataFrame(np.full(S_matrix.shape[0], None), index=S_matrix.columns).iloc[:,0]
 
 #-------------------------------------
 
 genres = list(
-    sorted(set([genre for genres in df_movies.genres.unique() for genre in genres.split("|")]))
+    sorted(set([genre for genres in df_selection.genres.unique() for genre in genres.split("|")]))
 )
 
 def get_displayed_movies():
@@ -53,7 +48,7 @@ def get_displayed_movies():
 
 def get_recommended_movies(new_user_ratings):
     df_new_user_ratings = pd.DataFrame([new_user_ratings]).T
-    df_new_user_ratings.index = 'm' + df_new_user_ratings.index
+    df_new_user_ratings.index = ['m' + str(x) for x in df_new_user_ratings.index]
     new_w = w_empty.copy()
     new_w[df_new_user_ratings.index] = df_new_user_ratings.iloc[:, 0].values
     top_10_str, _ = myIBCF(new_w)
