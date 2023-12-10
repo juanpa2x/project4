@@ -1,229 +1,59 @@
-from logging import debug
-from typing import Dict
-
-import dash
-import dash_bootstrap_components as dbc
+import numpy as np
 import pandas as pd
-from dash import Input, Output, dcc, html
-from dash.dependencies import ALL, State
+import requests
+from io import StringIO
 
-from myfuns import (genres, get_displayed_movies, get_popular_movies,
-                    get_recommended_movies)
-tmp_val = 0
+def readDat(this_url, col_names):
+    this_string_raw = requests.get(this_url).text.split('\n')[:-1]
+    this_data = [line.split('::') for line in this_string_raw]
+    return pd.DataFrame(this_data, columns=col_names)
 
-app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.BOOTSTRAP], 
-               suppress_callback_exceptions=True)
-server = app.server
+def myIBCF(w):
+    w_pred = pd.DataFrame(np.zeros(S_matrix.shape[1]), index=S_matrix.columns, columns=['estimate'])
+    for l in S_top_30.index:
+        l_top_30_ix = S_top_30.loc[l, :].values
+        w_l_top_30 = w[l_top_30_ix]
+        S_l_top_30 = S_matrix.loc[l, l_top_30_ix]
+        target_ix = (~S_l_top_30.isnull()) & (~w_l_top_30.isnull())
+        sub_w = w_l_top_30[target_ix.values]
+        sub_s = S_l_top_30[target_ix.values]
+        w_l_pred = (sub_w * sub_s).sum() / sub_s.sum()
+        w_pred.loc[l] = w_l_pred
+    w_merged = pd.DataFrame(w).merge(w_pred, left_index=True, right_index=True)
+    w_sorted = w_merged[w_merged.iloc[:, 0].isnull()].sort_values('estimate', ascending=False)
+    return w_sorted.head(10).index.values, w_sorted
 
-# the style arguments for the sidebar. We use position:fixed and a fixed width
-SIDEBAR_STYLE = {
-    "position": "fixed",
-    "top": 0,
-    "left": 0,
-    "bottom": 0,
-    "width": "16rem",
-    "padding": "2rem 1rem",
-    "background-color": "#f8f9fa",
-}
+target_url = "https://liangfgithub.github.io/MovieData/"
+df_movies = readDat(target_url + 'movies.dat?raw=true', ['movie_id', 'title', 'genres'])
 
-# the styles for the main content position it to the right of the sidebar and
-# add some padding.
-CONTENT_STYLE = {
-    "margin-left": "18rem",
-    "margin-right": "2rem",
-    "padding": "2rem 1rem",
-}
+# df_users = readDat(target_url + 'users.dat?raw=true', ['UserID', 'Gender', 'Age', 'Occupation', 'Zip-code'])
+# df_users['Age'] = df_users.Age.astype(int)
+# df_users['UserID'] = df_users.UserID.astype(int)
 
-sidebar = html.Div(
-    [
-        html.H3("Movie Recommender", className="display-8"),
-        html.Hr(),
-        dbc.Nav(
-            [
-                dbc.NavLink("System 1 - Genre", href="/", active="exact"),
-                dbc.NavLink("System 2 - Collaborative", href="/system-2", active="exact"),
-            ],
-            vertical=True,
-            pills=True,
-        ),
-    ],
-    style=SIDEBAR_STYLE,
+#read pre-built dataframes
+df_selection = pd.read_csv("movies_top.csv", index_col=0)
+S_matrix = pd.read_csv("s_matrix_sub.csv", index_col=0)
+S_top_30 = pd.read_csv("s_top_30_sub.csv", index_col=0)
+
+w_empty = pd.DataFrame(np.full(S_matrix.shape[0], None), index=S_matrix.columns).iloc[:,0]
+
+#-------------------------------------
+
+genres = list(
+    sorted(set([genre for genres in df_selection.genres.unique() for genre in genres.split("|")]))
 )
 
+def get_displayed_movies():
+    return df_selection.head(100)
 
-content = html.Div(id="page-content", style=CONTENT_STYLE)
+def get_recommended_movies(new_user_ratings):
+    df_new_user_ratings = pd.DataFrame([new_user_ratings]).T
+    df_new_user_ratings.index = ['m' + str(x) for x in df_new_user_ratings.index]
+    new_w = w_empty.copy()
+    new_w[df_new_user_ratings.index] = df_new_user_ratings.iloc[:, 0].values
+    top_10_str, _ = myIBCF(new_w)
+    top_10_no_only = [x[1:] for x in top_10_str]
+    return df_movies.set_index('movie_id').loc[top_10_no_only].reset_index()
 
-app.layout = html.Div([dcc.Location(id="url"), sidebar, content])
-
-@app.callback(Output("page-content", "children"), [Input("url", "pathname")])
-
-def render_page_content(pathname):
-    if pathname == "/":
-        return html.Div(
-            [
-                html.H1("Select a genre"),
-                dcc.Dropdown(
-                    id="genre-dropdown",
-                    options=[{"label": k, "value": k} for k in genres],
-                    value=None,
-                    className="mb-4",
-                ),
-                html.Div(id="genre-output", className=""),
-            ]
-        )
-    elif pathname == "/system-2":
-        movies = get_displayed_movies()
-        return html.Div(
-            [
-                html.Div(
-                    [
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    html.H1("Rate some movies below to"),
-                                    width="auto",
-                                ),
-                                dbc.Col(
-                                    dbc.Button(
-                                        children=[
-                                            "Get recommendations ",
-                                            html.I(className="bi bi-emoji-heart-eyes-fill"),
-                                        ],
-                                        size="lg",
-                                        className="btn-success",
-                                        id="button-recommend",
-                                    ),
-                                    className="p-0",
-                                ),
-                            ],
-                            className="sticky-top bg-white py-2",
-                        ),
-                        html.Div(
-                            [
-                                get_movie_card(movie, with_rating=True)
-                                for idx, movie in movies.iterrows()
-                            ],
-                            className="row row-cols-1 row-cols-5",
-                            id="rating-movies",
-                        ),
-                    ],
-                    id="rate-movie-container",
-                ),
-                html.H1(
-                    "Your recommendations", id="your-recommendation",  style={"display": "none"}
-                ),
-                dcc.Loading(
-                    [
-                        dcc.Link(
-                            "Try again", href="/system-2", refresh=True, className="mb-2 d-block"
-                        ),
-                        html.Div(
-                            className="row row-cols-1 row-cols-5",
-                            id="recommended-movies",
-                        ),
-                    ],
-                    type="circle",
-                ),
-            ]
-        )
-
-@app.callback(Output("genre-output", "children"), Input("genre-dropdown", "value"))
-def update_output(genre):
-    if genre is None:
-        return html.Div()
-    else: 
-        return [
-            dbc.Row(
-                [
-                    html.Div(
-                        [
-                            *[
-                                get_movie_card(movie)
-                                for idx, movie in get_popular_movies(genre).iterrows()
-                            ],
-                        ],
-                        className="row row-cols-1 row-cols-5",
-                    ),
-                ]
-            ),
-        ]
-
-
-    
-def get_movie_card(movie, with_rating=False):
-    return html.Div(
-        dbc.Card(
-            [
-                dbc.CardImg(
-                    src=f"https://liangfgithub.github.io/MovieImages/{movie.movie_id}.jpg?raw=true",
-                    top=True,
-                ),
-                dbc.CardBody(
-                    [
-                        html.H6(movie.title, className="card-title text-center"),
-                    ]
-                ),
-            ]
-            + (
-                [
-                    dcc.RadioItems(
-                        options=[
-                            {"label": "1", "value": "1"},
-                            {"label": "2", "value": "2"},
-                            {"label": "3", "value": "3"},
-                            {"label": "4", "value": "4"},
-                            {"label": "5", "value": "5"},
-                        ],
-                        className="text-center",
-                        id={"type": "movie_rating", "movie_id": movie.movie_id},
-                        inputClassName="m-1",
-                        labelClassName="px-1",
-                    )
-                ]
-                if with_rating
-                else []
-            ),
-            className="h-100",
-        ),
-        className="col mb-4",
-    )
-    
-@app.callback(
-    Output("rate-movie-container", "style"),
-    Output("your-recommendation", "style"),
-    [Input("button-recommend", "n_clicks")],
-    prevent_initial_call=True,
-)    
-def on_recommend_button_clicked(n):
-    return {"display": "none"}, {"display": "block"}
-
-@app.callback(
-    Output("recommended-movies", "children"),
-    [Input("rate-movie-container", "style")],
-    [
-        State({"type": "movie_rating", "movie_id": ALL}, "value"),
-        State({"type": "movie_rating", "movie_id": ALL}, "id"),
-    ],
-    prevent_initial_call=True,
-)
-
-def on_getting_recommendations(style, ratings, ids):
-    rating_input = {
-        ids[i]["movie_id"]: int(rating) for i, rating in enumerate(ratings) if rating is not None
-    }
-    global tmp_val
-    tmp_val = rating_input
-    recommended_movies = get_recommended_movies(rating_input)
- 
-    return [get_movie_card(movie) for idx, movie in recommended_movies.iterrows()]
-
-
-@app.callback(
-    Output("button-recommend", "disabled"),
-    Input({"type": "movie_rating", "movie_id": ALL}, "value"),
-)
-def update_button_recommened_visibility(values):
-    return not list(filter(None, values))
-
-if __name__ == "__main__":
-    app.run_server(port=8050, debug=True)
+def get_popular_movies(genre: str):
+    return df_selection[df_selection.genres.str.contains(genre)].head(10)
