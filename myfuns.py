@@ -32,8 +32,8 @@ df_movies = readDat(target_url + 'movies.dat?raw=true', ['movie_id', 'title', 'g
 
 #read pre-built dataframes
 df_selection = pd.read_csv("movies_top.csv", index_col=0)
-S_matrix = pd.read_csv("s_matrix.csv", index_col=0)
-S_top_30 = pd.read_csv("s_top_30.csv", index_col=0)
+S_matrix = pd.read_csv("s_matrix_sub.csv", index_col=0)
+S_top_30 = pd.read_csv("s_top_30_sub.csv", index_col=0)
 
 w_empty = pd.DataFrame(np.full(S_matrix.shape[0], None), index=S_matrix.columns).iloc[:,0]
 
